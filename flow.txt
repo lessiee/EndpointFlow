@@ -1,0 +1,325 @@
+========================================
+GARENA AUTHENTICATION FLOW - BY RIEL
+========================================
+
+BASE DOMAINS:
+- sso.garena.com
+- account.garena.com
+- 100082.connect.garena.com
+- api-delete-request-aos.codm.garena.co.id
+- authgop.garena.com
+- shop.garena.sg (and regional variants)
+- datadome.garena.com
+
+========================================
+1. PRELOGIN
+========================================
+URL: https://sso.garena.com/api/prelogin
+Method: GET
+Headers:
+  - accept: application/json, text/plain, */*
+  - accept-encoding: gzip, deflate, br, zstd
+  - accept-language: en-US,en;q=0.9
+  - connection: keep-alive
+  - host: sso.garena.com
+  - referer: https://sso.garena.com/universal/login?app_id=10100&redirect_uri=https%3A%2F%2Faccount.garena.com%2F&locale=en-SG&account={account}
+  - user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36
+  - cookie: (optional) apple_state_key=...; datadome=...; sso_key=...
+Query Parameters:
+  - app_id=10100 (fixed)
+  - account={account}
+  - format=json
+  - id={timestamp_ms}
+Response (JSON):
+  - v1: string
+  - v2: string
+Cookies Set (from response): datadome (if present)
+
+========================================
+2. LOGIN
+========================================
+URL: https://sso.garena.com/api/login
+Method: GET
+Headers:
+  - accept: application/json, text/plain, */*
+  - referer: https://account.garena.com/
+  - user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0.0.0 Safari/537.36
+  - cookie: apple_state_key=...; datadome=...; sso_key=... (from previous)
+Query Parameters:
+  - app_id=10100
+  - account={account}
+  - password={hashed_password}  ← computed as hash_password(password, v1, v2)
+  - redirect_uri=https://account.garena.com/
+  - format=json
+  - id={timestamp_ms}
+Response:
+  - If success: HTTP 200, sets sso_key, apple_state_key in cookies
+  - If error: JSON with "error" field (e.g., "ACCOUNT DOESNT EXIST", "error_auth", etc.)
+Cookies Set: sso_key, apple_state_key, datadome
+
+========================================
+3. ACCOUNT INIT (fetch user details)
+========================================
+URL: https://account.garena.com/api/account/init
+Method: GET
+Headers:
+  - accept: */*
+  - referer: https://account.garena.com/
+  - user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0.0.0 Safari/537.36
+  - cookie: apple_state_key=...; datadome=...; sso_key=...
+Response (JSON):
+  {
+    "user_info": {
+      "uid": "...",
+      "username": "...",
+      "nickname": "...",
+      "email": "...",
+      "email_v": 0/1,
+      "shell": 123,
+      "mobile_no": "...",
+      "acc_country": "...",
+      "country_code": "...",
+      "fb_account": { "fb_username": "...", "fb_uid": "..." },
+      "status": 1,
+      "realname": "...",
+      "idcard": "...",
+      "two_step_verify_enable": 0/1,
+      "authenticator_enable": 0/1,
+      ...
+    },
+    "login_history": [
+      { "timestamp": 1234567890, "source": "web", "ip": "1.2.3.4", "country": "PH" }
+    ]
+  }
+
+========================================
+4. CODM OAUTH GRANT (get authorization code)
+========================================
+URL: https://100082.connect.garena.com/oauth/token/grant
+Method: POST
+Headers:
+  - Host: 100082.connect.garena.com
+  - Connection: keep-alive
+  - Accept: application/json, text/plain, */*
+  - User-Agent: Mozilla/5.0 (Linux; Android 9; Pixel 4 Build/PQ3A.190801.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/81.0.4044.117 Mobile Safari/537.36; GarenaMSDK/5.12.1(Pixel 4 ;Android 9;en;us;)
+  - Content-Type: application/x-www-form-urlencoded;charset=UTF-8
+  - Origin: https://100082.connect.garena.com
+  - X-Requested-With: com.garena.game.codm
+  - Sec-Fetch-Site: same-origin
+  - Sec-Fetch-Mode: cors
+  - Sec-Fetch-Dest: empty
+  - Referer: https://100082.connect.garena.com/universal/oauth?client_id=100082&locale=en-US&create_grant=true&login_scenario=normal&redirect_uri=gop100082://auth/&response_type=code
+  - Accept-Encoding: gzip, deflate
+  - Accept-Language: en-US,en;q=0.9
+  - Cookie: apple_state_key=...; datadome=...; sso_key=...
+Body (form-urlencoded):
+  client_id=100082
+  &response_type=code
+  &redirect_uri=gop100082%3A%2F%2Fauth%2F
+  &create_grant=true
+  &login_scenario=normal
+  &format=json
+  &id={timestamp_ms}
+Response (JSON): { "code": "..." }
+
+========================================
+5. CODM TOKEN EXCHANGE
+========================================
+URL: https://100082.connect.garena.com/oauth/token/exchange
+Method: POST
+Headers:
+  - User-Agent: GarenaMSDK/5.12.1(Pixel 4 ;Android 9;en;us;)
+  - Content-Type: application/x-www-form-urlencoded
+  - Host: 100082.connect.garena.com
+  - Connection: Keep-Alive
+  - Accept-Encoding: gzip
+Body (form-urlencoded):
+  grant_type=authorization_code
+  &code={code_from_step4}
+  &device_id={auto_generated_uuid}
+  &redirect_uri=gop100082%3A%2F%2Fauth%2F
+  &source=2
+  &client_id=100082
+  &client_secret=388066813c7cda8d51c1a70b0f6050b991986326fcfb0cb3bf2287e861cfa415
+Response (JSON):
+  {
+    "access_token": "...",
+    "open_id": "...",
+    "uid": "..."
+  }
+
+========================================
+6. CODM CALLBACK (get codm-delete-token)
+========================================
+URL: https://api-delete-request-aos.codm.garena.co.id/oauth/callback/
+Method: GET
+Headers:
+  - accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+  - user-agent: Mozilla/5.0 (Linux; Android 15; Lenovo TB-9707F) AppleWebKit/537.36 Chrome/144.0.0.0 Mobile Safari/537.36
+  - referer: https://100082.connect.garena.com/
+  - x-requested-with: com.garena.game.codm
+  - Cookie: (current session cookies)
+Query Parameters: access_token={access_token_from_step5}
+Response: HTTP 302 Redirect
+  - If success: Location header contains "token=..." → extract token
+  - If no CODM: Location contains "err=3"
+
+========================================
+7. CODM CHECK LOGIN (get user info)
+========================================
+URL: https://api-delete-request-aos.codm.garena.co.id/oauth/check_login/
+Method: GET
+Headers:
+  - accept: application/json, text/plain, */*
+  - codm-delete-token: {token_from_step6}
+  - origin: https://delete-request-aos.codm.garena.co.id
+  - referer: https://delete-request-aos.codm.garena.co.id/
+  - user-agent: Mozilla/5.0 (Linux; Android 15; Lenovo TB-9707F) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.59 Mobile Safari/537.36
+  - x-requested-with: com.garena.game.codm
+  - Cookie: (session cookies)
+Response (JSON):
+  {
+    "user": {
+      "codm_nickname": "...",
+      "codm_level": 123,
+      "region": "PH",
+      "uid": "...",
+      "open_id": "...",
+      "t_open_id": "..."
+    }
+  }
+
+========================================
+8. GAME CONNECTIONS (optional - via Garena Shop)
+========================================
+8a. Get Shop Access Token
+URL: https://authgop.garena.com/oauth/token/grant
+Method: POST
+Headers:
+  - User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+  - Pragma: no-cache
+  - Accept: */*
+  - Content-Type: application/x-www-form-urlencoded
+  - Cookie: (current session)
+Body: client_id=10017&response_type=token&redirect_uri=https%3A%2F%2Fshop.garena.sg%2F%3Fapp%3D100082&format=json&id={timestamp_ms}
+Response (JSON): { "access_token": "..." }
+
+8b. Inspect Token (get session_key and uac/region)
+URL: https://shop.garena.sg/api/auth/inspect_token
+Method: POST
+Headers:
+  - User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+  - Accept: */*
+  - Content-Type: application/json
+Body (JSON): { "token": "{access_token_from_8a}" }
+Response (JSON): { "uac": "ph", ... }
+Cookies Set: session_key
+
+8c. Get Roles for each game
+URL: https://{base_domain}/api/shop/apps/roles  (base_domain depends on region)
+Method: GET
+Headers:
+  - User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+  - Accept: application/json, text/plain, */*
+  - Referer: https://{base_domain}/?app={app_id}
+  - Cookie: session_key=...
+Query Parameters: app_id={game_id} (e.g., 100082 for CODM, 100067 for Free Fire, etc.)
+Base Domains per region:
+  - ph, sg, my, tw, etc. → shop.garena.{region}
+  - th, in → termgame.com
+  - id → kiosgamer.co.id
+  - vn → napthe.vn
+Response: JSON containing "role" list (first element is the in-game role/IGN).
+
+========================================
+9. DATADOME COOKIE GENERATION (anti-bot)
+========================================
+URL: https://datadome.garena.com/js/
+Method: POST
+Headers:
+  - host: datadome.garena.com
+  - sec-ch-ua-platform: "Android"
+  - user-agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36
+  - sec-ch-ua: "Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"
+  - content-type: application/x-www-form-urlencoded
+  - sec-ch-ua-mobile: ?1
+  - accept: */*
+  - origin: https://account.garena.com
+  - sec-fetch-site: same-site
+  - sec-fetch-mode: cors
+  - sec-fetch-dest: empty
+  - referer: https://account.garena.com/
+  - accept-encoding: gzip, deflate, br, zstd
+  - accept-language: en-US,en;q=0.9
+  - priority: u=1, i
+Body (form-urlencoded): Large payload with fields:
+  - jspl: (long base64-like string)
+  - eventCounters: []
+  - jsType: ch
+  - cid: (dynamic)
+  - ddk: AE3F04AD3F0D3A462481A337485081 (fixed)
+  - Referer: https://account.garena.com/
+  - request: /
+  - responsePage: origin
+  - ddv: 5.6.6
+Response (JSON): { "status": 200, "cookie": "datadome=..." }
+Extract datadome value from cookie string.
+
+========================================
+HARDCODED CONSTANTS
+========================================
+- app_id (SSO): 10100
+- client_id (CODM): 100082
+- client_secret (CODM): 388066813c7cda8d51c1a70b0f6050b991986326fcfb0cb3bf2287e861cfa415
+- redirect_uri (CODM): gop100082://auth/
+- source (token exchange): 2
+- client_id (Shop): 10017
+- Game IDs mapping:
+  - 100082: CODM
+  - 100067: Free Fire
+  - 100055 / 100054: ROV
+  - 100151: Delta Force
+  - 100070: Speed Drifters
+  - 100130: Black Clover M
+  - 100105: Garena Undawn
+  - 100057: AOV
+  - etc. (see script for full list)
+
+========================================
+COOKIES USED
+========================================
+- datadome (anti-bot, domain .garena.com)
+- sso_key (authentication, domain .garena.com)
+- apple_state_key (session, domain .garena.com)
+- session_key (shop API, domain varies)
+- _ga, _ga_XB5PSHEQB4, _ga_1M7M9L6VPX (Google Analytics, required for DataDome)
+
+========================================
+FLOW ORDER
+========================================
+1. Prelogin (get v1, v2)
+2. Login (get sso_key)
+3. Account Init (get user details)
+4. CODM OAuth Grant (get auth code)
+5. CODM Token Exchange (get access_token)
+6. CODM Callback (get codm-delete-token)
+7. CODM Check Login (get user info)
+8. (Optional) Game Connections via Shop API
+   a. Get Shop access token
+   b. Inspect token (get session_key, region)
+   c. Fetch roles per game
+9. If 403/ban: Generate fresh DataDome cookie via datadome.garena.com
+
+========================================
+PASSWORD HASHING ALGORITHM
+========================================
+1. passmd5 = md5(urldecode(password))
+2. inner_hash = sha256(passmd5 + v1)
+3. outer_hash = sha256(inner_hash + v2)
+4. final = AES_ECB_encrypt(passmd5, key=outer_hash) → hex (first 32 chars)
+
+This hash is used as the "password" parameter in the login request.
+
+========================================
+END OF SPECIFICATION
+========================================
